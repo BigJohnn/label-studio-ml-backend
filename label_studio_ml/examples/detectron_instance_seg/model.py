@@ -19,6 +19,9 @@ from detectron2.config import get_cfg
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
 from pycocotools import mask as mask_utils  # 关键导入语句
+
+from label_studio_ml.utils import get_single_tag_keys
+import base64
 import logging
 logger = logging.getLogger(__name__)
 
@@ -64,7 +67,7 @@ def get_tangram_dicts(data_dir):
 
             # 步骤3：验证是否为二值化掩膜（0/255）
             mask = (mask > 0).astype(np.uint8) * 255
-            
+
             # 生成COCO格式的RLE
             coco_rle = mask_utils.encode(np.asarray(mask, order="F", dtype=np.uint8))
 
@@ -89,7 +92,10 @@ def get_tangram_dicts(data_dir):
 class InstanceSegmentationModel(LabelStudioMLBase):
     """Custom ML Backend model
     """
-    
+    def __init__(self, project_id: Optional[str] = None, label_config=None):
+        super(InstanceSegmentationModel, self).__init__(project_id, label_config)  # 自动解析配置
+        print(self.parsed_label_config)  # 直接访问解析结果
+
     def setup(self):
         """Configure any parameters of your model here
         """
@@ -106,8 +112,8 @@ class InstanceSegmentationModel(LabelStudioMLBase):
 
         logger.info(f"Downloaded {len(tasks)} labeled tasks from Label Studio")
 
-        images=[]
-        masks=[]
+        # images=[]
+        # masks=[]
         # for task in tasks:
         #     for annotation in task['annotations']:
         #         if not annotation.get('result') or annotation.get('skipped') or annotation.get('was_cancelled'):
@@ -167,62 +173,160 @@ class InstanceSegmentationModel(LabelStudioMLBase):
         cv2.fillPoly(mask, [contours], 1)
         return self.rle_encode(mask)
     
-    def predict(self, tasks: List[Dict], context: Optional[Dict] = None, **kwargs) -> ModelResponse:
-        """ Write your inference logic here
-            :param tasks: [Label Studio tasks in JSON format](https://labelstud.io/guide/task_format.html)
-            :param context: [Label Studio context in JSON format](https://labelstud.io/guide/ml_create#Implement-prediction-logic)
-            :return model_response
-                ModelResponse(predictions=predictions) with
-                predictions: [Predictions array in JSON format](https://labelstud.io/guide/export.html#Label-Studio-JSON-format-of-annotated-tasks)
-        """
-        print(f'''\
-        Run prediction on {tasks}
-        Received context: {context}
-        Project ID: {self.project_id}
-        Label config: {self.label_config}
-        Parsed JSON Label config: {self.parsed_label_config}
-        Extra params: {self.extra_params}''')
+    # def predict(self, tasks: List[Dict], context: Optional[Dict] = None, **kwargs) -> ModelResponse:
+    #     """ Write your inference logic here
+    #         :param tasks: [Label Studio tasks in JSON format](https://labelstud.io/guide/task_format.html)
+    #         :param context: [Label Studio context in JSON format](https://labelstud.io/guide/ml_create#Implement-prediction-logic)
+    #         :return model_response
+    #             ModelResponse(predictions=predictions) with
+    #             predictions: [Predictions array in JSON format](https://labelstud.io/guide/export.html#Label-Studio-JSON-format-of-annotated-tasks)
+    #     """
+    #     print(f'''\
+    #     Run prediction on {tasks}
+    #     Received context: {context}
+    #     Project ID: {self.project_id}
+    #     Label config: {self.label_config}
+    #     Parsed JSON Label config: {self.parsed_label_config}
+    #     Extra params: {self.extra_params}''')
 
-        cfg = get_cfg()
-        # add project-specific config (e.g., TensorMask) here if you're not running a model in detectron2's core library
-        cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
-        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5  # set threshold for this model
-        # Find a model from detectron2's model zoo. You can use the https://dl.fbaipublicfiles... url as well
-        cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
-        predictor = DefaultPredictor(cfg)
+    #     cfg = get_cfg()
+    #     #  模型文件路径 ./output/model_final.pth 
+    #     # add project-specific config (e.g., TensorMask) here if you're not running a model in detectron2's core library
+    #     cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+    #     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5  # set threshold for this model
+    #     # Find a model from detectron2's model zoo. You can use the https://dl.fbaipublicfiles... url as well
+    #     cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
+    #     predictor = DefaultPredictor(cfg)
 
-        path = self.get_local_path(tasks[0]['data']['image'], task_id=tasks[0]['id'])
+    #     path = self.get_local_path(tasks[0]['data']['image'], task_id=tasks[0]['id'])
 
-        im = Image.open(path)
-        outputs = predictor(im)
-        results = []
+    #     im = Image.open(path)
+    #     outputs = predictor(im)
+    #     results = []
 
-        instances = outputs["instances"].to("cpu")
-        # label_id = ?
+    #     instances = outputs["instances"].to("cpu")
+    #     # label_id = ?
         
-        from_name, to_name, value = self.get_first_tag_occurence('BrushLabels', 'Image')
-        width,height = im.size
-        # results.append({
-        #     'id': label_id,
-        #     'from_name': from_name,
-        #     'to_name': to_name,
-        #     'original_width': width,
-        #     'original_height': height,
-        #     'image_rotation': 0,
-        #     'value': {
-        #         'format': 'rle',
-        #         'rle': rle,
-        #         'brushlabels': [selected_label],
-        #     },
-        #     'type': 'brushlabels',
-        #     'readonly': False
-        # })
+    #     from_name, to_name, value = self.get_first_tag_occurence('BrushLabels', 'Image')
+    #     width,height = im.size
+    #     # results.append({
+    #     #     'id': label_id,
+    #     #     'from_name': from_name,
+    #     #     'to_name': to_name,
+    #     #     'original_width': width,
+    #     #     'original_height': height,
+    #     #     'image_rotation': 0,
+    #     #     'value': {
+    #     #         'format': 'rle',
+    #     #         'rle': rle,
+    #     #         'brushlabels': [selected_label],
+    #     #     },
+    #     #     'type': 'brushlabels',
+    #     #     'readonly': False
+    #     # })
             
-        return [{
-            'result': results,
-            'model_version': self.get('model_version')
-            # 'score': total_prob / max(len(results), 1)
-        }]
+    #     return [{
+    #         'result': results,
+    #         'model_version': self.get('model_version')
+    #         # 'score': total_prob / max(len(results), 1)
+    #     }]
+    def predict(self, tasks: List[Dict], context: Optional[Dict] = None, **kwargs) -> ModelResponse:
+        cfg = get_cfg()
+        cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")  # 使用训练好的模型权重
+        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+        cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128   # The "RoIHead batch size". 128 is faster, and good enough for this toy dataset (default: 512)
+        cfg.MODEL.ROI_HEADS.NUM_CLASSES = 7  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
+        cfg.INPUT.MASK_FORMAT = "bitmask"
+        predictor = DefaultPredictor(cfg)
+        
+        results = []
+        category_map = {
+            0: "quad",
+            1: "triangle_white",
+            2: "triangle_yellow",
+            3: "triangle_red",
+            4: "triangle_blue",
+            5: "triangle_green",
+            6: "parallelogram"
+        }
+
+        for task in tasks:
+            # 获取图像路径和尺寸
+            image_path = self.get_local_path(task['data']['image'], task_id=task['id'])
+            image = cv2.imread(image_path)
+            height, width = image.shape[:2]
+            
+            # 执行预测
+            outputs = predictor(image)
+            instances = outputs["instances"].to("cpu")
+            
+            # 解析模型输出
+            pred_boxes = instances.pred_boxes.tensor.numpy() if instances.has("pred_boxes") else None
+            scores = instances.scores.numpy() if instances.has("scores") else None
+            pred_classes = instances.pred_classes.numpy() if instances.has("pred_classes") else None
+            pred_masks = instances.pred_masks.numpy() if instances.has("pred_masks") else None
+
+            # self.parsed_label_config == {'tag2': {'type': 'KeyPointLabels', 'to_name': ['image'], 'inputs': [{'type': 'Image', 'valueType': None, 'value': 'image'}], 'labels': ['quad', 'triangle_white', 'triangle_yellow', 'triangle_red', 'triangle_blue', 'triangle_green', 'parallelogram'], 'labels_attrs': {'quad': {'value': 'quad', 'background': '#FF6B6B'}, 'triangle_white': {'value': 'triangle_white', 'background': '#FFFFFF'}, 'triangle_yellow': {'value': 'triangle_yellow', 'background': '#FFD700'}, 'triangle_red': {'value': 'triangle_red', 'background': '#FF0000'}, 'triangle_blue': {'value': 'triangle_blue', 'background': '#1890FF'}, 'triangle_green': {'value': 'triangle_green', 'background': '#52C41A'}, 'parallelogram': {'value': 'parallelogram', 'background': '#B37FEB'}}}, 'tag3': {'type': 'RectangleLabels', 'to_name': ['image'], 'inputs': [{'type': 'Image', 'valueType': None, 'value': 'image'}], 'labels': ['quad', 'triangle_white', 'triangle_yellow', 'triangle_red', 'triangle_blue', 'triangle_green', 'parallelogram'], 'labels_attrs': {'quad': {'value': 'quad', 'background': '#FF6B6B'}, 'triangle_white': {'value': 'triangle_white', 'background': '#FFFFFF'}, 'triangle_yellow': {'value': 'triangle_yellow', 'background': '#FFD700'}, 'triangle_red': {'value': 'triangle_red', 'background': '#FF0000'}, 'triangle_blue': {'value': 'triangle_blue', 'background': '#1890FF'}, 'triangle_green': {'value': 'triangle_green', 'background': '#52C41A'}, 'parallelogram': {'value': 'parallelogram', 'background': '#B37FEB'}}}, 'tagx': {'type': 'PolygonLabels', 'to_name': ['image'], 'inputs': [{'type': 'Image', 'valueType': None, 'value': 'image'}], 'labels': ['quad', 'triangle_white', 'triangle_yellow', 'triangle_red', 'triangle_blue', 'triangle_green', 'parallelogram'], 'labels_attrs': {'quad': {'value': 'quad', 'background': '#FF6B6B'}, 'triangle_white': {'value': 'triangle_white', 'background': '#FFFFFF'}, 'triangle_yellow': {'value': 'triangle_yellow', 'background': '#FFD700'}, 'triangle_red': {'value': 'triangle_red', 'background': '#FF0000'}, 'triangle_blue': {'value': 'triangle_blue', 'background': '#1890FF'}, 'triangle_green': {'value': 'triangle_green', 'background': '#52C41A'}, 'parallelogram': {'value': 'parallelogram', 'background': '#B37FEB'}}}, 'tag': {'type': 'BrushLabels', 'to_name': ['image'], 'inputs': [{'type': 'Image', 'valueType': None, 'value': 'image'}], 'labels': ['quad', 'triangle_white', 'triangle_yellow', 'triangle_red', 'triangle_blue', 'triangle_green', 'parallelogram'], 'labels_attrs': {'quad': {'value': 'quad', 'background': '#FF6B6B'}, 'triangle_white': {'value': 'triangle_white', 'background': '#FFFFFF'}, 'triangle_yellow': {'value': 'triangle_yellow', 'background': '#FFD700'}, 'triangle_red': {'value': 'triangle_red', 'background': '#FF0000'}, 'triangle_blue': {'value': 'triangle_blue', 'background': '#1890FF'}, 'triangle_green': {'value': 'triangle_green', 'background': '#52C41A'}, 'parallelogram': {'value': 'parallelogram', 'background': '#B37FEB'}}}}
+            brush_config = {
+                k: v for k, v in self.parsed_label_config.items() 
+                if v['type'] == 'BrushLabels'
+            }
+            assert len(brush_config) == 1, "必须存在且仅存在一个BrushLabels标签"
+
+            # 使用过滤后的配置调用函数
+            from_name, to_name, value, labels = get_single_tag_keys(
+                parsed_label_config=brush_config,
+                control_type="BrushLabels", 
+                object_type="Image"
+            )
+            print(f"from_name: {from_name}, to_name: {to_name}, value: {value}, labels: {labels}")
+
+            task_results = []
+            for i in range(len(instances)):
+                if scores[i] < 0.5:  # 过滤低置信度结果
+                    continue
+
+                # 转换掩膜为RLE格式[1](@ref)
+                mask = pred_masks[i].astype(np.uint8) * 255
+
+                # Save the mask as an image for debugging purposes
+                mask_image_path = f"mask_{task['id']}_{i}.png"
+                cv2.imwrite(mask_image_path, mask)
+                print(f"Saved mask image to {mask_image_path}")
+
+                rle = mask_utils.encode(np.asfortranarray(mask))  # 确保内存连续
+                # rle['counts'] = rle['counts'].decode('utf-8')  # 转换为字符串格式
+                rle['counts'] = base64.b64encode(rle['counts']).decode('utf-8')
+                print(f"RLE: {rle}") #rle是乱码， 如何转成字符串数字
+                #TODO....................................................................................
+                
+                # 获取类别标签
+                class_id = pred_classes[i]
+                label = category_map.get(class_id, "unknown")
+
+                # 构建结果字典[1,4](@ref)
+                task_results.append({
+                    'from_name': from_name,
+                    'to_name': to_name,
+                    'type': 'brushlabels',
+                    'value': {
+                        'format': 'rle',
+                        'rle': rle,
+                        'brushlabels': [label],
+                        'width': width,
+                        'height': height
+                    },
+                    'score': float(scores[i])
+                })
+
+            results.append({
+                'result': task_results,
+                'model_version': self.get('model_version'),
+                'score': float(np.mean(scores)) if scores.any() else 0.0
+            })
+        
+        return ModelResponse(predictions=results)
     
     def fit(self, event, data, **kwargs):
         """
