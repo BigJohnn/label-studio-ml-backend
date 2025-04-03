@@ -1,23 +1,11 @@
-version: "3.8"
-
 services:
-  ml-backend:
-    container_name: ml-backend
+  instance-seg-ml-backend:
+    container_name: instance-seg-ml-backend
     image: humansignal/ml-backend:v0
     build:
       context: .
       args:
         TEST_ENV: ${TEST_ENV}
-
-    deploy:
-     resources:
-       reservations:
-         devices:
-           - driver: nvidia
-             count: 1
-             capabilities: [ gpu ]
-
-
     environment:
       # specify these parameters if you want to use basic auth for the model server
       - BASIC_AUTH_USER=admin
@@ -31,12 +19,6 @@ services:
       - THREADS=8
       # specify the model directory (likely you don't need to change this)
       - MODEL_DIR=/data/models
-      # specify device
-      - DEVICE=cuda  # or 'cpu' (coming soon)
-      # SAM2 model config
-      - MODEL_CONFIG=configs/sam2.1/sam2.1_hiera_l.yaml
-      # SAM2 checkpoint
-      - MODEL_CHECKPOINT=sam2.1_hiera_large.pt
 
       # Specify the Label Studio URL and API key to access
       # uploaded, local storage and cloud storage files.
@@ -46,6 +28,6 @@ services:
       - LABEL_STUDIO_URL=http://192.168.100.159:8080
       - LABEL_STUDIO_API_KEY=a3f7c8e8cac209f797f9c65bc98c82c9d00a07c6
     ports:
-      - "9090:9090"
+      - "5090:9090"
     volumes:
       - "./data/server:/data"
