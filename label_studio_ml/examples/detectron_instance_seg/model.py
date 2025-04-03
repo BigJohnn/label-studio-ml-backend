@@ -51,26 +51,35 @@ def get_tangram_dicts(data_dir):
         # 遍历所有标注结果
         for res in annotation['result']:
             # 解码RLE并生成mask
+            # mask = brush.decode_rle(res['value']['rle'])
+            # mask = np.reshape(mask, [res['original_height'], res['original_width'], 4])[:, :, 3]
             mask = brush.decode_rle(res['value']['rle'])
-            mask = np.reshape(mask, [res['original_height'], res['original_width'], 4])[:, :, 3]
 
+            mask = mask.astype(np.uint8)
+            # 步骤1：将一维数组转换为四通道形状 (H, W, 4)
+            mask_4d = mask.reshape(res['original_height'], res['original_width'], 4)
+
+            # 步骤2：提取Alpha通道（假设第4通道为有效掩膜）
+            mask = mask_4d[:, :, 3]  # 索引从0开始，第4通道对应索引3
+
+            # 步骤3：验证是否为二值化掩膜（0/255）
+            mask = (mask > 0).astype(np.uint8) * 255
+            
             # 生成COCO格式的RLE
-            coco_rle = mask_utils.encode(np.asarray(mask, order="F"))
+            coco_rle = mask_utils.encode(np.asarray(mask, order="F", dtype=np.uint8))
 
             # 计算边界框（需要OpenCV）
             contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             max_contour = max(contours, key=cv2.contourArea)
             x_min, y_min, w, h = cv2.boundingRect(max_contour)
 
-            # 构建annotation字典
+            x_max = x_min + w
+            y_max = y_min + h
             ann = {
-                "bbox": [x_min, y_min, w, h],
-                "bbox_mode": BoxMode.XYWH_ABS,
+                "bbox": [x_min, y_min, x_max, y_max],
+                "bbox_mode": BoxMode.XYXY_ABS,
                 "category_id": category_map[res['value']['brushlabels'][0]],
-                "segmentation": {
-                    "size": [res['original_height'], res['original_width']],
-                    "counts": coco_rle['counts'].decode('utf-8')
-                },
+                "segmentation": coco_rle,
                 "iscrowd": 0
             }
             record["annotations"].append(ann)
@@ -239,7 +248,6 @@ class InstanceSegmentationModel(LabelStudioMLBase):
 
         if event == 'START_TRAINING':
             logger.info("Fitting model")
-            
 
             cfg = get_cfg()
             cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
@@ -253,6 +261,7 @@ class InstanceSegmentationModel(LabelStudioMLBase):
             cfg.SOLVER.STEPS = []        # do not decay learning rate
             cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128   # The "RoIHead batch size". 128 is faster, and good enough for this toy dataset (default: 512)
             cfg.MODEL.ROI_HEADS.NUM_CLASSES = 7  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
+            cfg.INPUT.MASK_FORMAT = "bitmask"
             # NOTE: this config means the number of classes, but a few popular unofficial tutorials incorrect uses num_classes+1 here.
 
             os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
