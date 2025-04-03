@@ -1,6 +1,6 @@
-torch
-torchvision
+torch==2.3.1 
+torchvision==0.18.1
+torchaudio==2.3.1
 label-studio-sdk
 opencv-python
-detectron2@git+https://github.com/facebookresearch/detectron2.git
 pillow

@@ -6,6 +6,10 @@ services:
       context: .
       args:
         TEST_ENV: ${TEST_ENV}
+      # cache_from: []
+      # no_cache: true
+
+    network_mode: host
     environment:
       # specify these parameters if you want to use basic auth for the model server
       - BASIC_AUTH_USER=admin
@@ -27,7 +31,10 @@ services:
       # Determine the actual IP using 'ifconfig' (Linux/Mac) or 'ipconfig' (Windows).
       - LABEL_STUDIO_URL=http://192.168.100.159:8080
       - LABEL_STUDIO_API_KEY=a3f7c8e8cac209f797f9c65bc98c82c9d00a07c6
+      - http_proxy=http://127.0.0.1:7897
+      - https_proxy=http://127.0.0.1:7897
+      - no_proxy=localhost,127.0.0.1
     ports:
-      - "5090:9090"
+      - "5090:9091"
     volumes:
       - "./data/server:/data"

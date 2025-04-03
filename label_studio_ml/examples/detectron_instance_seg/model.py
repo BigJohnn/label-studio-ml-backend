@@ -1,13 +1,13 @@
 from typing import List, Dict, Optional
 from label_studio_ml.model import LabelStudioMLBase
 from label_studio_ml.response import ModelResponse
-
+from label_studio_sdk.converter import brush
 from PIL import Image
 import label_studio_sdk
 import torch, detectron2
 import numpy as np
 from detectron2.engine import DefaultTrainer
-
+from detectron2.structures import BoxMode
 from detectron2.utils.logger import setup_logger
 setup_logger()
 
@@ -18,10 +18,65 @@ from detectron2.engine import DefaultPredictor
 from detectron2.config import get_cfg
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
-
+from pycocotools import mask as mask_utils  # 关键导入语句
 import logging
 logger = logging.getLogger(__name__)
 
+def get_tangram_dicts(data_dir):
+    dataset_dicts = []
+    category_map = {"quad": 0,
+                    "triangle_white":1,
+                    "triangle_yellow":2,
+                    "triangle_red":3,
+                    "triangle_blue":4,
+                    "triangle_green":5,
+                    "parallelogram":6,
+                    } 
+    
+    for task in InstanceSegmentationModel.processed_data:
+        annotation = task['annotations'][0]
+        if not annotation.get('result') or annotation.get('skipped') or annotation.get('was_cancelled'):
+            continue
+
+        # 提取基础图像信息
+        x = annotation['result'][0]
+        record = {
+            "file_name": task['data']['image'],
+            "image_id": task['id'],
+            "height": x['original_height'],
+            "width": x['original_width'],
+            "annotations": []
+        }
+
+        # 遍历所有标注结果
+        for res in annotation['result']:
+            # 解码RLE并生成mask
+            mask = brush.decode_rle(res['value']['rle'])
+            mask = np.reshape(mask, [res['original_height'], res['original_width'], 4])[:, :, 3]
+
+            # 生成COCO格式的RLE
+            coco_rle = mask_utils.encode(np.asarray(mask, order="F"))
+
+            # 计算边界框（需要OpenCV）
+            contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            max_contour = max(contours, key=cv2.contourArea)
+            x_min, y_min, w, h = cv2.boundingRect(max_contour)
+
+            # 构建annotation字典
+            ann = {
+                "bbox": [x_min, y_min, w, h],
+                "bbox_mode": BoxMode.XYWH_ABS,
+                "category_id": category_map[res['value']['brushlabels'][0]],
+                "segmentation": {
+                    "size": [res['original_height'], res['original_width']],
+                    "counts": coco_rle['counts'].decode('utf-8')
+                },
+                "iscrowd": 0
+            }
+            record["annotations"].append(ann)
+
+        dataset_dicts.append(record)
+    return dataset_dicts
 class InstanceSegmentationModel(LabelStudioMLBase):
     """Custom ML Backend model
     """
@@ -34,20 +89,68 @@ class InstanceSegmentationModel(LabelStudioMLBase):
         # 初始化配置
         self.LABEL_STUDIO_HOST = os.getenv('LABEL_STUDIO_URL', 'http://192.168.100.159:8080')
         self.LABEL_STUDIO_API_KEY = os.getenv('LABEL_STUDIO_API_KEY', 'a3f7c8e8cac209f797f9c65bc98c82c9d00a07c6')
+        print(f"Label Studio host: {self.LABEL_STUDIO_HOST}")
+        print(f"Label Studio API key: {self.LABEL_STUDIO_API_KEY}")
+        ls = label_studio_sdk.Client(self.LABEL_STUDIO_HOST, self.LABEL_STUDIO_API_KEY)
+        project = ls.get_project(id=self.project_id)
+        tasks = project.get_labeled_tasks()
+
+        logger.info(f"Downloaded {len(tasks)} labeled tasks from Label Studio")
+
+        images=[]
+        masks=[]
+        # for task in tasks:
+        #     for annotation in task['annotations']:
+        #         if not annotation.get('result') or annotation.get('skipped') or annotation.get('was_cancelled'):
+        #             continue
+
+        #         path = self.get_local_path(task['data']['image'], task_id=task['id'])
+        #         image = Image.open(path)
+        #         images.append(image)
+
+        #         res = task['annotations'][0]['result'][0]
+
+        #         # image.save('detectron_instance_seg/images/image'+str(task['id'])+'.jpg')
+
+        #         width = res['original_width']
+        #         height = res['original_height']
+        #         rle = res['value']['rle']
+
+        #         # 示例RLE数据
+        #         # shape = (width, height)  # 图像形状
+
+        #         # 解码RLE
+        #         mask = brush.decode_rle(rle)
+        #         mask = np.reshape(mask, [height, width , 4])[:, :, 3]
+        #         masks.append(Image.fromarray(mask/255))
+
+                # # 创建PIL图像
+                # pil_image = Image.fromarray(mask, mode='L')
+                # # 保存为JPEG
+                # pil_image.save('detectron_instance_seg/masks/mask'+str(task['id'])+'.jpg')
+
+        # 将处理后的数据保存为类变量
+        InstanceSegmentationModel.processed_data = tasks
+
+        for d in ["train", "val"]:
+            dataset_name = f"tangram_{d}"
+            # 移除已存在的注册
+            if dataset_name in DatasetCatalog.list():
+                DatasetCatalog.remove(dataset_name)
+            # TODO: tasks 的数据如何传给DatasetCatalog.register
+            DatasetCatalog.register(dataset_name, 
+                lambda d=d: get_tangram_dicts(os.path.join("tangram", d)))
+            MetadataCatalog.get("tangram_" +d).set(thing_classes=["quad", 
+                                                                    "triangle_white",
+                                                                    "triangle_yellow",
+                                                                    "triangle_red",
+                                                                    "triangle_blue",
+                                                                    "triangle_green",
+                                                                    "parallelogram",
+                                                                    ])
+            
+        InstanceSegmentationModel.tangram_metadata = MetadataCatalog.get("tangram_train")
         
-        # 从标注配置解析标签
-        self.labels = self.get_ordered_labels()
-        logger.info(f'Loaded labels from config: {self.labels}')
-        
-    def get_ordered_labels(self) -> List[str]:
-        """改进的标签解析方法"""
-        from_name, to_name, value, labels = get_single_tag_keys(
-            self.parsed_label_config, 
-            control_tag='BrushLabels',
-            object_tag='Image'
-        )
-        return labels
-    
     def polygon_to_rle(self, points: List[float], width: int, height: int) -> List[int]:
         """将多边形坐标转换为RLE格式"""
         mask = np.zeros((height, width), dtype=np.uint8)
@@ -90,21 +193,21 @@ class InstanceSegmentationModel(LabelStudioMLBase):
         
         from_name, to_name, value = self.get_first_tag_occurence('BrushLabels', 'Image')
         width,height = im.size
-        results.append({
-            'id': label_id,
-            'from_name': from_name,
-            'to_name': to_name,
-            'original_width': width,
-            'original_height': height,
-            'image_rotation': 0,
-            'value': {
-                'format': 'rle',
-                'rle': rle,
-                'brushlabels': [selected_label],
-            },
-            'type': 'brushlabels',
-            'readonly': False
-        })
+        # results.append({
+        #     'id': label_id,
+        #     'from_name': from_name,
+        #     'to_name': to_name,
+        #     'original_width': width,
+        #     'original_height': height,
+        #     'image_rotation': 0,
+        #     'value': {
+        #         'format': 'rle',
+        #         'rle': rle,
+        #         'brushlabels': [selected_label],
+        #     },
+        #     'type': 'brushlabels',
+        #     'readonly': False
+        # })
             
         return [{
             'result': results,
@@ -136,11 +239,7 @@ class InstanceSegmentationModel(LabelStudioMLBase):
 
         if event == 'START_TRAINING':
             logger.info("Fitting model")
-            ls = label_studio_sdk.Client(self.LABEL_STUDIO_HOST, self.LABEL_STUDIO_API_KEY)
-            project = ls.get_project(id=self.project_id)
-            tasks = project.get_labeled_tasks()
-
-            logger.info(f"Downloaded {len(tasks)} labeled tasks from Label Studio")
+            
 
             cfg = get_cfg()
             cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))

@@ -9,11 +9,12 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=${PORT:-9090} \
+    PORT=${PORT:-9091} \
     PIP_CACHE_DIR=/.cache \
     WORKERS=1 \
     THREADS=8
 
+COPY sources.list /etc/apt/sources.list
 # Update the base OS
 RUN --mount=type=cache,target="/var/cache/apt",sharing=locked \
     --mount=type=cache,target="/var/lib/apt/lists",sharing=locked \
@@ -21,7 +22,7 @@ RUN --mount=type=cache,target="/var/cache/apt",sharing=locked \
     apt-get update; \
     apt-get upgrade -y; \
     apt install --no-install-recommends -y  \
-        git; \
+        git libgl1-mesa-glx libglvnd0 mesa-utils libgl1-mesa-dev freeglut3-dev libglib2.0-0 libglib2.0-dev; \
     apt-get autoremove -y
 
 # install base requirements
@@ -33,6 +34,8 @@ RUN --mount=type=cache,target=${PIP_CACHE_DIR},sharing=locked \
 COPY requirements.txt .
 RUN --mount=type=cache,target=${PIP_CACHE_DIR},sharing=locked \
     pip install -r requirements.txt
+
+RUN pip install --extra-index-url https://miropsota.github.io/torch_packages_builder detectron2==0.6+pt2.3.0cu121
 
 # install test requirements if needed
 COPY requirements-test.txt .

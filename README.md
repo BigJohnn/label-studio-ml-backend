@@ -1,3 +1,9 @@
+```
+export LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT="/home/hanyu/.local/share/label-studio/media/upload"
+conda activate label-studio
+label-studio-ml start detectron_instance_seg -p 5090
+```
+
 # What is the Label Studio ML backend?
 
 The Label Studio ML backend is an SDK that lets you wrap your machine learning code and turn it into a web server.

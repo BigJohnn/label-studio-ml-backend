@@ -134,3 +134,5 @@ dmypy.json
 .idea/
 label_studio_ml/examples/segment_anything_2_image/data/server/models/sam2.1_hiera_large.pt
 label_studio_ml/examples/detectron_instance_seg/model_final_f10217.pkl
+label_studio_ml/examples/detectron_instance_seg/images
+label_studio_ml/examples/detectron_instance_seg/masks
